@@ -1,0 +1,74 @@
+{
+  "name": "dsh-tvendo",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "DeepSeek Harness plugin: find and call Tvendo tools from an ordinary DSH session",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "cordis",
+    "tvendo",
+    "tools",
+    "marketplace"
+  ],
+  "license": "LGPL-3.0-only",
+  "author": "dyunwei",
+  "engines": {
+    "node": ">=22",
+    "dsh": ">=0.2.1-rc.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Broken-Rabbit/tvendo_dsh.git"
+  },
+  "homepage": "https://github.com/Broken-Rabbit/tvendo_dsh#readme",
+  "bugs": {
+    "url": "https://github.com/Broken-Rabbit/tvendo_dsh/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "meta": {
+    "title": "Tvendo 工具市场 / Tvendo tools",
+    "description": "在 DSH 会话里搜索并调用 Tvendo 平台上的外部工具：按次计价、同一余额与预算。"
+  },
+  "icon": "./icon.svg",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/api.js",
+    "lib/config.js",
+    "lib/connection.js",
+    "lib/constants.js",
+    "lib/format.js",
+    "lib/tools.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test --test-isolation=none test/api.test.mjs test/connection.test.mjs test/format.test.mjs test/tools.test.mjs",
+    "pack": "node scripts/pack.mjs",
+    "check:pack": "npm run pack && node scripts/verify-package.mjs",
+    "check:live": "node scripts/live-check.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "~3.19.0"
+  }
+}
