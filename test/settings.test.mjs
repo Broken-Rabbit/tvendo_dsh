@@ -8,7 +8,11 @@ import { resolveConnection } from '../lib/connection.js'
 // A minimal contract double for DSH's public SettingsFormModel. The same
 // controller was also smoke-tested locally against the shipped DSH model.
 class Model {
-  constructor(scope, specs) { this.scope = scope; this.specs = new Map(specs.map(s => [s.field, s])); this.staged = new Map() }
+  constructor(scope, specs) {
+    this.scope = scope; this.specs = new Map(specs.map(s => [s.field, s])); this.staged = new Map()
+    this.listeners = new Set()
+    this.unsubscribe = scope.subscribe(() => this.publish())
+  }
   field(field) { const spec = this.specs.get(field); return { text: this.staged.get(field) ?? spec.format(this.scope.getSnapshot().value[field]) } }
   shell() { return { available: true, writable: true, dirty: this.plan().length > 0 } }
   plan() {
@@ -19,9 +23,22 @@ class Model {
       return [{ field, op: parsed ? { op: 'set', path: [field], value: parsed.value } : undefined }]
     })
   }
-  bind(project) { return { getSnapshot: project } }
-  actions() { return { edit: (field, text) => this.staged.set(field, text) } }
-  dispose() {}
+  bind(project) {
+    let snapshot = project()
+    this.listeners.add(() => { snapshot = project() })
+    return { getSnapshot: () => snapshot }
+  }
+  publish() { for (const listener of this.listeners) listener() }
+  async save() {
+    const plan = this.plan()
+    if (plan.some(item => !item.op)) return false
+    const accepted = await this.scope.mutate(plan.map(item => item.op), this.scope.getSnapshot().revision)
+    if (accepted) this.staged.clear()
+    this.publish()
+    return accepted
+  }
+  actions() { return { edit: (field, text) => { this.staged.set(field, text); this.publish() } } }
+  dispose() { this.unsubscribe(); this.listeners.clear() }
 }
 function loadClient({ fetchImpl } = {}) {
   let plugin
@@ -40,7 +57,21 @@ function loadClient({ fetchImpl } = {}) {
   return plugin
 }
 function scope() {
-  return { getSnapshot: () => ({ value: { server: 'https://t.zhitoken.com', defaultMaxCostMicros: 0, requestTimeoutMs: 120000 }, secrets: [{ path: ['apiKey'], set: true }] }) }
+  // The real ConfigFormController does NOT copy secrets into this snapshot.
+  return { getSnapshot: () => ({ status: 'ready', writable: true, revision: 1, value: { server: 'https://t.zhitoken.com', defaultMaxCostMicros: 0, requestTimeoutMs: 120000 } }), subscribe: () => () => {}, mutate: async () => true }
+}
+function mirror(configured = true) {
+  const listeners = new Set()
+  let snapshot = { view: { namespaces: [{ ns: 'tvendo', secrets: [{ path: ['apiKey'], set: configured }] }] } }
+  return {
+    getSnapshot: () => snapshot,
+    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
+    setConfigured(value) {
+      snapshot = { view: { namespaces: [{ ns: 'unrelated', secrets: [{ path: ['apiKey'], set: true }] }, { ns: 'tvendo', secrets: [{ path: ['apiKey'], set: value }] }] } }
+      for (const listener of listeners) listener()
+    },
+    listeners,
+  }
 }
 const plain = value => JSON.parse(JSON.stringify(value))
 function findNode(node, predicate) {
@@ -69,7 +100,7 @@ test('settings card registers in plugins.item only while tvendo is served', () =
   let disposed = false
   plugin.apply({
     locale: { register: () => () => {}, bind: () => key => key },
-    configForms: { get: ns => { assert.equal(ns, 'tvendo'); return scope() }, whileServed(names, callback) { assert.deepEqual(plain(names), ['tvendo']); return callback() } },
+    configForms: { describe: () => mirror(), get: ns => { assert.equal(ns, 'tvendo'); return scope() }, whileServed(names, callback) { assert.deepEqual(plain(names), ['tvendo']); return callback() } },
     slots: { inject(name, callback) { assert.ok(['plugins.item', 'settings.section', 'plugins.detail.section'].includes(name)); return callback() }, register(definition, component) { registered = { definition, component }; return () => { disposed = true } } },
     effect: fn => fn(),
   })
@@ -81,7 +112,7 @@ test('settings card registers in plugins.item only while tvendo is served', () =
 
 test('saved credential stays out of the draft while key presence is reported', () => {
   const { TvendoCardController } = loadClient()
-  const card = new TvendoCardController(scope())
+  const card = new TvendoCardController(scope(), mirror())
   const state = card.store.getSnapshot()
   assert.equal(state.apiKey.text, '')
   assert.equal(state.keyConfigured, true)
@@ -89,6 +120,60 @@ test('saved credential stays out of the draft while key presence is reported', (
   assert.deepEqual(plain(card.form.plan()).map(item => item.field), ['defaultMaxCostMicros'])
   card.inject().edit('apiKey', '')
   assert.equal(card.form.plan().some(item => item.field === 'apiKey'), false)
+})
+
+test('saving a key shows the saved indicator with the real DSH snapshot shape', async () => {
+  const { TvendoCardController, TvendoSecretField } = loadClient()
+  const form = scope(), describe = mirror(false)
+  assert.equal(form.getSnapshot().secrets, undefined)
+  let savedValue
+  form.mutate = async operations => {
+    savedValue = operations.find(operation => operation.path[0] === 'apiKey')?.value
+    describe.setConfigured(Boolean(savedValue))
+    return true
+  }
+  const card = new TvendoCardController(form, describe)
+  assert.equal(card.store.getSnapshot().keyConfigured, false)
+  card.inject().edit('apiKey', 'new-test-key')
+  assert.equal(card.store.getSnapshot().apiKey.text, 'new-test-key')
+  await card.form.save()
+  const state = card.store.getSnapshot()
+  assert.equal(savedValue, 'new-test-key')
+  assert.equal(state.apiKey.text, '')
+  assert.equal(state.keyConfigured, true)
+  const element = TvendoSecretField({ id: 'key', text: state.apiKey.text, configured: state.keyConfigured, savedLabel: '已保存密钥' })
+  assert.equal(findNode(element, node => node.props?.id === 'key-saved').props.children, '已保存密钥')
+  card.dispose()
+  assert.equal(describe.listeners.size, 0)
+  const reopened = new TvendoCardController(form, describe)
+  assert.equal(reopened.store.getSnapshot().keyConfigured, true)
+  assert.equal(reopened.store.getSnapshot().apiKey.text, '')
+  reopened.dispose()
+})
+
+test('mirror-only secret changes refresh key state and do not use another namespace', () => {
+  const { TvendoCardController } = loadClient()
+  const describe = mirror(true)
+  const card = new TvendoCardController(scope(), describe)
+  assert.equal(card.store.getSnapshot().keyConfigured, true)
+  describe.setConfigured(false)
+  assert.equal(card.store.getSnapshot().keyConfigured, false)
+  describe.setConfigured(true)
+  assert.equal(card.store.getSnapshot().keyConfigured, true)
+  card.dispose()
+  assert.equal(describe.listeners.size, 0)
+})
+
+test('failed key saves keep the draft without claiming the key was saved', async () => {
+  const { TvendoCardController } = loadClient()
+  const form = scope(), describe = mirror(false)
+  form.mutate = async () => false
+  const card = new TvendoCardController(form, describe)
+  card.inject().edit('apiKey', 'unsaved-test-key')
+  await card.form.save()
+  assert.equal(card.store.getSnapshot().apiKey.text, 'unsaved-test-key')
+  assert.equal(card.store.getSnapshot().keyConfigured, false)
+  card.dispose()
 })
 
 test('new keys are visible while typing without changing the entered value', () => {
@@ -129,7 +214,7 @@ test('saved key has a grey bold italic label, never an input value', () => {
 
 test('typing then clearing a key preserves the saved credential', () => {
   const { TvendoCardController } = loadClient()
-  const card = new TvendoCardController(scope())
+  const card = new TvendoCardController(scope(), mirror())
   card.inject().edit('apiKey', 'new-test-key')
   assert.equal(card.store.getSnapshot().apiKey.text, 'new-test-key')
   assert.equal(card.form.plan()[0].op.value, 'new-test-key')
@@ -140,7 +225,7 @@ test('typing then clearing a key preserves the saved credential', () => {
 
 test('new key and server are saved together; old key is cleared on endpoint change', () => {
   const { TvendoCardController } = loadClient()
-  const card = new TvendoCardController(scope())
+  const card = new TvendoCardController(scope(), mirror())
   card.inject().edit('server', 'https://other.example.com/')
   assert.deepEqual(plain(card.form.plan()).map(item => item.op), [
     { op: 'set', path: ['server'], value: 'https://other.example.com' },
@@ -154,7 +239,7 @@ test('new key and server are saved together; old key is cleared on endpoint chan
 
 test('UI rejects invalid numbers and URLs with embedded credentials', () => {
   const { TvendoCardController } = loadClient()
-  const card = new TvendoCardController(scope())
+  const card = new TvendoCardController(scope(), mirror())
   for (const [field, text] of [['server', 'javascript:alert(1)'], ['server', 'https://key@example.com'], ['requestTimeoutMs', '999'], ['defaultMaxCostMicros', '-1'], ['defaultMaxCostMicros', '1.5']]) {
     assert.equal(card.form.specs.get(field).parse(text), undefined)
   }
@@ -196,7 +281,7 @@ test('updates are registered on the installed plugin detail page', () => {
   const registrations = []
   plugin.apply({
     locale: { register: () => () => {}, bind: () => key => key },
-    configForms: { get: () => scope(), whileServed: () => () => {} },
+    configForms: { describe: () => mirror(), get: () => scope(), whileServed: () => () => {} },
     slots: { inject: (_name, callback) => callback(), register(definition, component) { registrations.push({ definition, component }); return () => {} } },
     effect: fn => fn(),
   })

@@ -53,10 +53,10 @@ npm test
 npm run check:pack
 ```
 
-生成的安装包位于 `dist/dsh-tvendo-0.3.2.tgz`。在插件管理页面中填写其**绝对路径**，例如：
+生成的安装包位于 `dist/dsh-tvendo-0.3.3.tgz`。在插件管理页面中填写其**绝对路径**，例如：
 
 ```text
-file:E:/path/to/tvendo_dsh/dist/dsh-tvendo-0.3.2.tgz
+file:E:/path/to/tvendo_dsh/dist/dsh-tvendo-0.3.3.tgz
 ```
 
 本地安装建议使用 `.tgz`，不要直接指向源码目录，以避免目录链接和依赖解析差异。
