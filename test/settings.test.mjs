@@ -48,7 +48,7 @@ function loadClient({ fetchImpl } = {}) {
   let state
   const ref = { current: null }
   const react = { useState(initial) { state ??= initial; return [state, next => { state = next }] }, useRef() { return ref }, useEffect() {} }
-  const sandbox = { URL, AbortSignal, AbortController, fetch: fetchImpl, window: { __ModuleLoader__: { load(definition) {
+  const sandbox = { URL, AbortSignal, AbortController, crypto: globalThis.crypto, fetch: fetchImpl, window: { __ModuleLoader__: { load(definition) {
     assert.equal(definition.id, 'dsh-tvendo')
     plugin = definition.factory(name => name === 'react/jsx-runtime' ? { jsx, jsxs: jsx } : name === 'react' ? react : primitives)
   } } } }
@@ -360,4 +360,133 @@ test('update failure re-enables the button for retry', async () => {
   assert.equal(plugin.testState().status, 'error')
   assert.equal(findNode(plugin.TvendoUpdatePanel(props), node => node.component === 'button').props.disabled, false)
   assert.match(JSON.stringify(plugin.TvendoUpdatePanel(props)), /updateFailed/)
+})
+
+const COMMIT = 'a'.repeat(40)
+function updateFetch(url) {
+  if (url === 'https://api.github.com/repos/Broken-Rabbit/tvendo_dsh/commits/main') return Promise.resolve(new Response(JSON.stringify({ sha: COMMIT })))
+  return Promise.resolve(new Response(JSON.stringify({ name: 'dsh-tvendo', version: '0.4.0' })))
+}
+function managerFixture({ failInstall = false, failRecovery = false, uncertain = false } = {}) {
+  const calls = []
+  let current = { name: 'dsh-tvendo', installed: true, removable: true, enabled: true, version: '0.3.3', source: 'github:Broken-Rabbit/tvendo_dsh#old-commit' }
+  const manager = {
+    async listBundles() { return { ok: true, value: current ? [current] : [] } },
+    async removeBundle(name) { calls.push(['remove', name]); current = null; return { ok: true, value: { application: 'applied' } } },
+    async installBundle(spec, options) {
+      calls.push(['install', spec, options])
+      if (uncertain) throw new Error('lost response')
+      const recovery = spec.endsWith('#old-commit')
+      if ((!recovery && failInstall) || (recovery && failRecovery)) return { ok: true, value: { application: 'failed' } }
+      current = { name: 'dsh-tvendo', installed: true, removable: true, enabled: options.enabled, version: recovery ? '0.3.3' : '0.4.0', source: spec }
+      return { ok: true, value: { application: 'applied', version: current.version } }
+    },
+    async waitForInstall(id) { calls.push(['wait', id]); return { ok: true, value: null } },
+  }
+  return { manager, calls }
+}
+
+test('confirmed update pins the approved version to a validated GitHub commit', async () => {
+  const { installConfirmedUpdate } = loadClient()
+  const { manager, calls } = managerFixture()
+  const result = await installConfirmedUpdate(manager, '0.3.3', '0.4.0', { fetchImpl: updateFetch, requestId: () => 'test-request' })
+  assert.equal(result.status, 'installed')
+  assert.equal(result.installedVersion, '0.4.0')
+  assert.equal(calls[0][0], 'remove')
+  assert.equal(calls[1][1], `github:Broken-Rabbit/tvendo_dsh#${COMMIT}`)
+  assert.deepEqual(plain(calls[1][2]), { enabled: true, requestId: 'test-request' })
+  assert.equal(result.restartRequired, true)
+})
+
+test('a changed remote version or invalid commit stops before removing anything', async () => {
+  const { installConfirmedUpdate } = loadClient()
+  for (const fetchImpl of [
+    async () => new Response(JSON.stringify({ sha: 'invalid' })),
+    async url => url.includes('api.github.com') ? new Response(JSON.stringify({ sha: COMMIT })) : new Response(JSON.stringify({ name: 'dsh-tvendo', version: '0.5.0' })),
+  ]) {
+    const { manager, calls } = managerFixture()
+    await assert.rejects(installConfirmedUpdate(manager, '0.3.3', '0.4.0', { fetchImpl }))
+    assert.equal(calls.length, 0)
+  }
+})
+
+test('failed installation restores the old source and verifies its version', async () => {
+  const { installConfirmedUpdate } = loadClient()
+  const { manager, calls } = managerFixture({ failInstall: true })
+  const result = await installConfirmedUpdate(manager, '0.3.3', '0.4.0', { fetchImpl: updateFetch, requestId: () => 'test-request' })
+  assert.equal(result.status, 'restored')
+  assert.equal(calls[2][1], 'github:Broken-Rabbit/tvendo_dsh#old-commit')
+})
+
+test('failed recovery is not presented as a successful update or restoration', async () => {
+  const { installConfirmedUpdate } = loadClient()
+  const { manager } = managerFixture({ failInstall: true, failRecovery: true })
+  const result = await installConfirmedUpdate(manager, '0.3.3', '0.4.0', { fetchImpl: updateFetch, requestId: () => 'test-request' })
+  assert.equal(result.status, 'install-error')
+})
+
+test('an unconfirmed install is reconciled by request id without duplicate installs', async () => {
+  const { installConfirmedUpdate } = loadClient()
+  const { manager, calls } = managerFixture({ uncertain: true })
+  const result = await installConfirmedUpdate(manager, '0.3.3', '0.4.0', { fetchImpl: updateFetch, requestId: () => 'test-request' })
+  assert.equal(result.status, 'unknown')
+  assert.equal(calls.filter(call => call[0] === 'install').length, 1)
+  assert.deepEqual(calls.find(call => call[0] === 'wait'), ['wait', 'test-request'])
+})
+
+test('a newer-version check asks for consent; cancel never changes installed packages', async () => {
+  const { manager, calls } = managerFixture()
+  const plugin = loadClient({ fetchImpl: updateFetch })
+  const props = { t: key => key, currentVersion: '0.3.3', pluginManager: manager }
+  await findNode(plugin.TvendoUpdatePanel(props), node => node.component === 'button').props.onClick()
+  let panel = plugin.TvendoUpdatePanel(props)
+  assert.ok(findNode(panel, node => node.props?.role === 'alertdialog'))
+  assert.equal(calls.length, 0)
+  findNode(panel, node => node.props?.children === 'cancelUpdate').props.onClick()
+  panel = plugin.TvendoUpdatePanel(props)
+  assert.equal(findNode(panel, node => node.props?.role === 'alertdialog'), undefined)
+  assert.equal(calls.length, 0)
+})
+
+test('installation runs only on explicit confirmation and ignores double clicks', async () => {
+  const { manager, calls } = managerFixture()
+  const plugin = loadClient({ fetchImpl: updateFetch })
+  const props = { t: key => key, currentVersion: '0.3.3', pluginManager: manager }
+  await findNode(plugin.TvendoUpdatePanel(props), node => node.component === 'button').props.onClick()
+  const confirm = findNode(plugin.TvendoUpdatePanel(props), node => node.props?.children === 'confirmInstall')
+  assert.equal(calls.length, 0)
+  const task = confirm.props.onClick()
+  await confirm.props.onClick()
+  assert.equal(plugin.testState().status, 'installing')
+  await task
+  assert.equal(plugin.testState().status, 'installed')
+  assert.equal(calls.filter(call => call[0] === 'remove').length, 1)
+  assert.equal(calls.filter(call => call[0] === 'install').length, 1)
+})
+
+test('an already changed installation stops before removing the package', async () => {
+  const { installConfirmedUpdate } = loadClient()
+  const { manager, calls } = managerFixture()
+  manager.listBundles = async () => ({ ok: true, value: [{ name: 'dsh-tvendo', installed: true, removable: true, version: '0.3.4', source: 'github:Broken-Rabbit/tvendo_dsh' }] })
+  await assert.rejects(installConfirmedUpdate(manager, '0.3.3', '0.4.0', { fetchImpl: updateFetch }))
+  assert.equal(calls.length, 0)
+})
+
+test('a failed removal never starts installation', async () => {
+  const { installConfirmedUpdate } = loadClient()
+  const { manager, calls } = managerFixture()
+  manager.removeBundle = async () => ({ ok: true, value: { application: 'failed' } })
+  const result = await installConfirmedUpdate(manager, '0.3.3', '0.4.0', { fetchImpl: updateFetch })
+  assert.equal(result.status, 'install-error')
+  assert.equal(calls.length, 0)
+})
+
+test('an encoded remote transport failure is reconciled without another install', async () => {
+  const { installConfirmedUpdate } = loadClient()
+  const { manager, calls } = managerFixture()
+  manager.installBundle = async (_spec, options) => { calls.push(['install', options.requestId]); return { ok: false, error: { message: 'lost' } } }
+  const result = await installConfirmedUpdate(manager, '0.3.3', '0.4.0', { fetchImpl: updateFetch, requestId: () => 'encoded-loss' })
+  assert.equal(result.status, 'unknown')
+  assert.equal(calls.filter(call => call[0] === 'install').length, 1)
+  assert.deepEqual(calls.find(call => call[0] === 'wait'), ['wait', 'encoded-loss'])
 })

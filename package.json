@@ -1,6 +1,6 @@
 {
   "name": "dsh-tvendo",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "type": "module",
   "description": "DeepSeek Harness plugin: find and call Tvendo tools from an ordinary DSH session",
   "keywords": [
