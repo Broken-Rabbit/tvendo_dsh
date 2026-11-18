@@ -1,179 +1,190 @@
 # dsh-tvendo
 
-把 [Tvendo](https://t.zhitoken.com) 平台接成 DeepSeek Harness 的原生插件：在任意 DSH 会话里直接搜索、查看并调用平台上的工具，**不用先装 CLI，也不用安装 Skill**。
+[Tvendo](https://t.zhitoken.com) 的 DeepSeek Harness（DSH）插件。在会话中搜索外部工具、查看参数与价格、执行调用，并查询余额和调用记录，**无需另装 Tvendo CLI 或 Skill**。
 
-Tvendo 的 Skill（`/SKILL.md`）描述的是「先查目录、看参数和价格、再带费用上限调用、丢了响应只查账不重试」这套流程；它的 CLI 把这些动作做成终端命令。本插件把这套流程变成六个原生工具，并把 Skill 里的约束直接写进工具描述和结果渲染里：
+插件提供中文 / 英文配置 UI，可在 **设置 → Tvendo 工具市场** 中管理服务地址、API Key、默认费用上限和请求超时。
 
-- 目录、价格、鉴权、余额、预算和结算仍然由你部署的 Tvendo 服务决定，插件只做一层薄接入，不缓存、不代理、不存储结果；
-- 是否允许调用、要不要人工确认，仍然由 DSH 自己的权限与审批管线决定；
-- 收费调用只发一次，绝不自动重试。
+## 功能
 
-仓库本身就是一个完整的 npm 包（`package.json` / `cordis.patch.yml` / License / 测试 / CI），可以直接用 `github:<owner>/<repo>` 或本地 `.tgz` 安装。
-
-## 提供的工具
-
-| 工具 | 作用 | 计费 |
+| 工具 | 用途 | 平台调用费用 |
 | --- | --- | --- |
-| `tvendo_info` | 读取服务公开信息：品牌、版本、API 版本、币种、CLI/Skill 是否可用 | 免费 |
-| `tvendo_search` | 按需求或关键词搜索工具目录，返回 `tool_ref`、名称、供应商、描述与单次价格 | 免费 |
-| `tvendo_show` | 读取单个工具的输入 Schema、输入示例与价格 | 免费 |
-| `tvendo_run` | 同步调用一个工具，返回结果与本次费用 | 按平台配置的单次价格 |
-| `tvendo_runs` | 查询本账户调用记录；按 `request_id` 核对丢失的响应 | 免费 |
-| `tvendo_account` | 查询余额、单次上限、每日预算与 UTC 重置时间 | 免费 |
+| `tvendo_info` | 查看服务品牌、版本、API 版本、币种及 CLI / Skill 可用性 | 免费，无需 Key |
+| `tvendo_search` | 搜索工具目录，查看候选工具、供应商、描述、价格和参数 Schema 是否可用；支持分页 | 免费，需要 Key |
+| `tvendo_show` | 查看指定工具的输入 Schema、输入示例和价格 | 免费，需要 Key |
+| `tvendo_run` | 同步执行工具，返回结果、费用及调用标识 | 按工具单次价格计费 |
+| `tvendo_runs` | 查询当前账户调用记录，按 `id` 或 `request_id` 核账 | 免费，需要 Key |
+| `tvendo_account` | 查询余额、单次上限、每日预算和 UTC 重置时间 | 免费，需要 Key |
 
-典型流程：`tvendo_search` → `tvendo_show` → `tvendo_run`；响应丢失时用 `request_id` 走 `tvendo_runs` 对账，**不重试**。
+标准流程：**搜索 → 查看详情和价格 → 获得费用授权 → 执行调用**。搜索结果只是候选，不保证满足任务需求；没有完整 Schema 时，不能把示例当作完整参数定义。
+
+上述“免费”指 Tvendo 平台接口费用，不包含 DSH 模型本身的使用费用。工具目录、定价、余额、账户预算及结算均由所连接的 Tvendo 服务决定。
+
+## 环境要求
+
+- DSH **>= 0.2.2-rc.1**；配置 UI 适用于 DSH Web / 桌面端浏览器界面。
+- Node.js **>= 22**（独立开发和打包时需要；桌面端通常由宿主提供运行环境）。
+- 能访问目标 Tvendo 服务；除公开服务信息外，使用平台接口需要该服务的 API Key。
 
 ## 安装
 
-### 方式一：GitHub（推荐）
+### 从 GitHub 安装
 
-在 **设置 → 插件 → 添加插件** 中填仓库地址：
+在 DSH 的**插件管理页面 → 添加插件**中填写：
 
 ```text
 https://github.com/Broken-Rabbit/tvendo_dsh
 ```
 
-或 SSH 简写：
+也可使用 GitHub 包标识（不是 SSH 地址）：
 
 ```text
 github:Broken-Rabbit/tvendo_dsh
 ```
 
-DSH 会用 profile 的包管理器克隆仓库并安装 `@deepseek-ai/schemastery`，不需要构建步骤。
+仓库根目录就是插件包，已包含浏览器入口，不需要额外编译 UI。安装后确认插件已启用；首次安装或升级后，建议完整退出并重启 DSH，以重新加载客户端模块。
 
-### 方式二：本地 tarball（开发调试）
+### 从本地安装
 
-必须装 `.tgz`：`file:` 指向目录会变成软链，插件自己的依赖不会被装进去，运行时会报 `Cannot find package '@deepseek-ai/schemastery'`。
-
-```sh
-npm run pack     # 产出 dist/dsh-tvendo-<版本>.tgz
-```
-
-然后在 **设置 → 插件 → 添加插件** 中填：
-
-```text
-file:E:/github/tvendo_dsh/dist/dsh-tvendo-0.3.0.tgz
-```
-
-装完重启该 profile（桌面端未开启 HMR 时同样需要重开 App）。
-
-### 方式三：npm（包发布后）
-
-```sh
-dsh plugin --profile <profile> add dsh-tvendo
-```
-
-## 配置
-
-0.3.0 起提供独立的浏览器设置卡片（不是自动生成的表单）。安装后刷新 DSH 界面，打开设置侧栏新增的 **Tvendo 工具市场** 页面即可配置（插件页也提供同一张配置卡片）：
-
-1. 填入服务地址与平台 API Key。
-2. 按需设置默认费用上限、请求超时。
-3. 点击「保存」。配置写入当前 profile，工具下次调用立即生效，无需重启。
-
-密钥输入框始终为空，仅提示是否已保存；不修改密钥时留空即可。服务地址更换时，若没有同时输入新密钥，插件中原有密钥会一并清除；环境变量和 CLI 密钥也不能跨地址复用。密钥按 DSH 的 secret 规则从配置读取响应中移除，但仍以明文保存在本机 profile 配置中。
-
-升级后没有看到卡片时，先刷新界面；如果宿主提示需要重启，请完整退出并重新启动 DSH。此 UI 需要 DSH **>= 0.2.2-rc.1**。
-
-| 字段 | 默认 | 说明 |
-| --- | --- | --- |
-| `server` | `https://t.zhitoken.com` | Tvendo 服务地址，必须带 `http(s)://` |
-| `apiKey` | 空 | 平台 API Key，在控制台「API 密钥」页创建 |
-| `defaultMaxCostMicros` | `0` | 每次调用的默认单次费用上限，单位微元（1000000 = 1 元）；`0` 表示不额外限制，仍受账户预算约束 |
-| `requestTimeoutMs` | `120000` | 单次 HTTP 请求超时（毫秒） |
-
-`apiKey` 是 `secret` 字段，设置页不会回显已保存的值。
-
-### 密钥与地址的来源顺序
-
-不填也能用。插件按下面的顺序解析，并且**不会把某个地址的密钥发往另一个地址**：
-
-1. 插件设置里的 `server` / `apiKey`；
-2. 环境变量 `TVENDO_SERVER` / `TVENDO_API_KEY`；
-3. `tvendo` CLI 的本地配置（Windows 为 `%APPDATA%\tvendo\config.json`，可用 `TVENDO_CONFIG` 覆盖路径）。
-
-已经用 CLI 配好接入的机器，装完插件即可直接使用，无需重复输入密钥。
-
-> 设置页里填写的密钥会随 profile 配置文档保存在本机；希望密钥只留在环境变量里的用户请把该字段留空。
-
-## 花费与安全
-
-- **搜索、详情、查账免费**，只有 `tvendo_run` 按平台配置的单次价格计费。
-- `tvendo_run` 的 `max_cost_micros` 会随请求发送；实际售价高于它时平台在扣费前拒绝调用（`403 COST_LIMIT_EXCEEDED`，`settlement=not_started`）。不传时使用插件默认值，仍不绕过账户预算。
-- 账户余额与预算**不是**用户对本次任务的费用授权；只应在用户明确同意的额度内调用。
-- 每次调用只发一次请求，从不自动重试可能已计费的调用。失败信息里带 `request_id`（以及已知时的 `run_id`、`settlement`），用于 `tvendo_runs` 对账。
-- 密钥只出现在发往你配置的服务地址的请求头里，不写日志、不进工具输出；插件对上游响应设置 `redirect: 'error'`，不跟随重定向。
-
-## 与 Skill / CLI 的关系
-
-三者可以共存，共用一个平台账户与预算：
-
-| 接入方式 | 适用 |
-| --- | --- |
-| 本插件 | DSH 内的会话，工具即原生能力，有设置页 |
-| 中文 Skill（`/SKILL.md`） | 其他支持 Skill 的 Agent |
-| `tvendo` CLI | 终端、脚本、其他 MCP 客户端 |
-
-插件不依赖 CLI 安装；CLI 只作为密钥与环境变量的一个兜底来源。
-
-## 从零验证
-
-只需要 Node.js 22+ 和一个 Tvendo 服务地址：
+在仓库根目录执行：
 
 ```sh
 npm install
-npm test            # 单测：API、连接解析、金额格式、六个工具（假部署，无网络）
-npm run check:pack  # 打包 → 空目录装 tarball → 本地假服务加载入口并驱动工具
+npm test
+npm run check:pack
 ```
 
-对真实部署做一次**不花钱**的检查（只调用 info、余额预算和目录搜索，不调用 `/v1/run`）：
-
-```sh
-TVENDO_SERVER=https://t.zhitoken.com TVENDO_API_KEY=tv_live_... npm run check:live
-```
-
-尚未创建平台密钥时只跑公开检查：把 `TVENDO_API_KEY` 留空即可，脚本会跳过鉴权部分。
-
-## 已知边界
-
-- 平台执行超时 60 秒，插件默认等 120 秒给结算留时间；超时后只能用 `request_id` 对账，不能重放结果。
-- 平台不保存可恢复的结果正文，`tvendo_runs` 只用于对账与诊断。
-- 平台目前只提供同步调用，没有异步任务/回调。
-- 工具名固定为 `tvendo_*`，不会与 DSH 自带工具冲突。
-- 需要 DSH `>= 0.2.2-rc.1`（`engines.dsh`），更低版本会被插件管理器拒绝。
-
-## 目录结构
+生成的安装包位于 `dist/dsh-tvendo-0.3.0.tgz`。在插件管理页面中填写其**绝对路径**，例如：
 
 ```text
-package.json          包与 bundle 清单（dsh.bundle.patch、卡片 meta/icon）
-cordis.patch.yml      插入的插件行：id=tvendo, name=dsh-tvendo
-lib/index.js          插件入口：导出 apply / Config / inject
-lib/tools.js          六个工具的 JSON Schema、校验、render 与调用
-lib/api.js            /v1 HTTP 客户端：错误映射、超时、request_id
-lib/connection.js     服务地址与密钥的来源解析
-lib/config.js         设置页表单的 Config schema
-lib/format.js         金额、截断与 JSON 预览
-lib/constants.js      默认地址、环境变量名、微元换算
-test/                 node:test 单测（假 fetch / 临时配置文件，无网络）
-scripts/pack.mjs              打包到 dist/
-scripts/verify-package.mjs    装 tarball 后从零加载入口并驱动工具
-scripts/live-check.mjs        真实部署的只读检查
-locale/、icon.svg     插件管理页的卡片元数据
+file:E:/path/to/tvendo_dsh/dist/dsh-tvendo-0.3.0.tgz
 ```
 
-设计约束：工具定义是普通 `ToolDefinition` 对象（原生 JSON Schema），**不 import Host 侧的 `@deepseek-ai/dsh-tools`**。profile 安装只会解析插件自己的依赖，引用 Host 包会解析失败或复制一份；Schema 必须停留在注册表支持的子集内（type/oneOf/properties/required/additionalProperties/items/enum/const + annotations），参数由各工具自己校验。
+本地安装建议使用 `.tgz`，不要直接指向源码目录，以避免目录链接和依赖解析差异。
 
-## 开发
+## 配置 API Key
+
+1. 在 [Tvendo 控制台](https://t.zhitoken.com) 创建平台 API Key。
+2. 打开 DSH **设置 → Tvendo 工具市场**。这是独立的设置侧栏入口，不在“内置插件”列表里；插件页也注册了同一张配置卡片。
+3. 填写服务地址和 API Key，按需调整费用上限与超时，点击**保存**。
+4. 保存后，工具在下一次调用时读取新配置，无需为每个新会话重复设置。
+
+| UI 字段 | 配置名 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| 服务地址 | `server` | `https://t.zhitoken.com` | 有效的 HTTP(S) 地址，不包含用户名、密码、查询参数或片段 |
+| API Key | `apiKey` | 空 | 当前服务的平台密钥；输入框留空表示保持已有密钥 |
+| 默认单次费用上限（微元） | `defaultMaxCostMicros` | `0` | 非负整数；`0` 表示不额外限制，仍受账户预算约束 |
+| 请求超时（毫秒） | `requestTimeoutMs` | `120000` | 1000–300000 的整数；建议为平台结算保留足够等待时间 |
+
+**金额单位：1 元 = 1000000 微元。** 例如单次上限 0.01 元应填写 `10000`。
+
+### 密钥保存与更换服务
+
+- 已保存的密钥不会回显或回传给配置页面，只显示是否已在插件中保存。输入新密钥后保存即替换原值；留空不会删除已有密钥。
+- 通过 UI 更换服务地址时，如果没有同时填写新密钥，会清除插件中原有的密钥，避免发送到另一个服务。
+- 密钥**明文保存在本机 profile 配置中**；`secret` 脱敏不等于磁盘加密。不要将 profile 配置提交到 Git，也不要把密钥粘贴到聊天中。
+
+### 环境变量与 CLI 配置
+
+也可以不在 UI 中保存密钥，使用 `TVENDO_API_KEY` 环境变量，或复用 Tvendo CLI 的本地配置。
+
+解析规则：
+
+1. 服务地址优先使用插件设置，其次是 `TVENDO_SERVER`、CLI 配置，最后回退到默认服务。插件默认已设置服务地址；使用自建服务时，请在 UI 中同步修改。
+2. 密钥优先使用插件设置；为空时，尝试匹配服务地址的环境变量密钥，再尝试同地址的 CLI 密钥。
+3. 环境变量密钥绑定到 `TVENDO_SERVER` 指定的地址；未指定时绑定默认服务。环境变量与 CLI 密钥都不会跨服务地址复用。
+
+Windows 的 CLI 配置默认位于 `%APPDATA%\tvendo\config.json`，可用 `TVENDO_CONFIG` 指定其他配置文件。更改环境变量后，需要重新启动 DSH，使其继承新环境。
+
+## 在新会话中使用
+
+插件启用且 Key 配置完成后，在允许使用这些工具的会话中直接描述需求即可，**无需再安装 Skill、运行 CLI 或逐个注册远端工具**。
+
+### 检查连接与账户
+
+> 检查 Tvendo 连接状态，并查询我的账户余额和预算。
+
+`tvendo_info` 只检查公开服务信息；读取成功不代表 Key 有效。需要通过账户或目录接口验证鉴权。
+
+### 先搜索，不产生收费调用
+
+> 用 Tvendo 搜索网页搜索工具，查看合适候选的参数和价格，不要执行收费调用。
+
+### 授权执行任务
+
+> 用 Tvendo 查询今天的科技新闻，总预算不超过 0.1 元。先确认工具能力和价格，再在预算内执行。
+
+插件提供的是**单次调用费用上限**，不是自动维护的任务总预算。Agent 需要根据用户授权跟踪累计费用；账户余额、每日预算和插件默认上限都不等于用户对本次任务的花费授权。
+
+### 核对异常调用
+
+> 用 Tvendo 查询 request_id 为“此前错误中返回的标识”的调用记录，不要重新执行。
+
+调用记录用于核账和诊断，不能恢复历史结果正文。断网、超时或结算状态未知时，不应自动重试可能已收费的调用。
+
+## 费用与安全边界
+
+- `tvendo_run` 可传 `max_cost_micros`；未指定时使用插件默认值。非零上限随请求发送，售价超过上限时由平台拒绝调用。`0` 不表示“只允许免费工具”。
+- 每次工具调用只发一次执行请求，不自动重试；对账时保留错误中可用的 `request_id`、调用编号及结算状态。
+- 退款不代表上游动作已经撤销；仅在平台明确返回 `settlement=refunded` 时确认退款。
+- 插件不跟随 HTTP 重定向，密钥通过请求头发送；工具返回内容及服务端说明应视为外部数据，不是新指令。
+- 平台目前按同步接口调用，执行超时为 60 秒，结算还需额外时间。插件默认请求超时为 120 秒。
+- 插件不持久保存调用结果正文，模型侧渲染会截断较长结果、描述或 Schema。
+- 本插件与 Tvendo Skill / CLI 是不同的接入方式，可以共存；CLI 并非插件依赖。
+
+## 常见问题
+
+### 没有“Tvendo 工具市场”配置入口
+
+确认安装了 **0.3.0 或更高版本**，插件已启用，且 DSH 满足最低版本要求。刷新页面；若仍不出现，请完整退出并重启 DSH。
+
+如果本地安装有 UI，但 GitHub 安装没有，检查新增的浏览器入口是否确实提交到了远端：
+
+```sh
+git ls-files lib/client.js test/settings.test.mjs
+```
+
+提交时只使用 `git commit -am` 不会包含未跟踪的新文件。请将新增文件加入版本控制并推送，再重新安装。当前插件管理器若不支持直接覆盖版本，可先卸载旧包，再安装新版本。
+
+### 提示未配置 Key，或 UI 显示未保存密钥
+
+UI 提示仅表示插件配置中是否保存了密钥，不代表环境变量或 CLI 中一定没有密钥。若调用仍提示未配置，请检查密钥来源、服务地址是否匹配，以及启动 DSH 的进程是否继承了环境变量。
+
+### 保存配置失败
+
+检查服务地址和数值范围；若其他窗口已更新配置，重新加载页面再填写。只读部署无法通过该表单保存。不要通过反复重试收费调用来测试配置。
+
+### 新会话找不到 `tvendo_*` 工具
+
+确认插件已启用、新会话所用的 Agent / 预设允许使用这些工具。升级或首次安装后可重启 DSH，再新建会话。无需为每个会话重新配置 Key。
+
+## 开发与验证
 
 ```sh
 npm install
-npm test           # 单测
-npm run check:pack # 打包 + 从零安装校验
-npm run check:live # 需要 TVENDO_SERVER / TVENDO_API_KEY
+npm test            # 离线回归测试：API、连接解析、格式、工具、配置 UI 和动态配置
+npm run check:pack  # 打包、空目录安装、检查客户端入口并用本地假服务驱动工具
+npm run check:live  # 对真实部署做只读检查，不调用 /v1/run
 ```
+
+`check:live` 使用环境变量 / CLI 配置，不读取 DSH profile 内保存的插件密钥。没有解析到 Key 时只检查公开服务信息；有 Key 时还会查询余额、预算和目录，不产生 Tvendo 执行调用费用。
+
+```text
+lib/index.js          宿主入口，注册六个工具，读取实时配置引用
+lib/client.js         浏览器配置 UI，注册设置侧栏入口与插件配置卡片
+lib/config.js         配置 Schema、secret 标记与 volatile 字段
+lib/connection.js     服务地址及密钥来源解析
+lib/api.js            HTTP 客户端、超时与平台错误处理
+lib/tools.js          工具定义、参数校验及结果渲染
+lib/format.js         金额与文本格式化
+lib/constants.js      默认服务地址与环境变量名
+locale/               中英文包元信息
+cordis.patch.yml      DSH bundle 插件条目
+scripts/              打包、安装校验及只读部署检查
+test/                 离线回归测试
+```
+
+浏览器入口直接使用 DSH 提供的模块加载器、React 和设置表单组件；没有独立前端构建步骤。宿主工具使用原生 JSON Schema，不依赖宿主侧工具辅助包。
 
 ## 许可
 
-[GNU LGPL v3](LICENSE)（`LGPL-3.0-only`）。
-
-本仓库基于上游 `dsh-tvendo` 0.1.6（作者 dyunwei）整理而来，沿用同一许可证；修改点见 [CHANGELOG](CHANGELOG.md)。
+[GNU LGPL v3](<LICENSE>)（`LGPL-3.0-only`）。基于上游 `dsh-tvendo` 0.1.6（作者 dyunwei）整理与扩展，沿用原许可证。版本变化见 [CHANGELOG](<CHANGELOG.md>)。
