@@ -37,6 +37,14 @@ if (installStatus !== 0) fail(installStatus)
 writeFileSync(join(work, 'check.mjs'), String.raw`
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+const manifest = require('dsh-tvendo/package.json')
+assert.equal(manifest.dsh.client.platform, 'web')
+assert.match(readFileSync(require.resolve('dsh-tvendo/client'), 'utf8'), /__ModuleLoader__/)
+assert.equal(require('dsh-tvendo/locale/zh.json').meta.title, 'Tvendo 工具市场')
 
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
@@ -73,7 +81,7 @@ const disposers = []
 plugin.apply({
   tools: { register: (definition) => { registered.push(definition); return () => {} } },
   effect: (fn) => { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose) },
-}, { server: origin, apiKey: 'test-key' })
+}, plugin.Config({ server: origin, apiKey: 'test-key' }))
 
 assert.deepEqual(registered.map((tool) => tool.name).sort(),
   ['tvendo_account', 'tvendo_info', 'tvendo_run', 'tvendo_runs', 'tvendo_search', 'tvendo_show'])

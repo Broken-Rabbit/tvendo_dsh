@@ -52,7 +52,7 @@ npm run pack     # 产出 dist/dsh-tvendo-<版本>.tgz
 然后在 **设置 → 插件 → 添加插件** 中填：
 
 ```text
-file:E:/github/tvendo_dsh/dist/dsh-tvendo-0.2.0.tgz
+file:E:/github/tvendo_dsh/dist/dsh-tvendo-0.3.0.tgz
 ```
 
 装完重启该 profile（桌面端未开启 HMR 时同样需要重开 App）。
@@ -65,7 +65,15 @@ dsh plugin --profile <profile> add dsh-tvendo
 
 ## 配置
 
-安装后打开 **设置 → 插件 → Tvendo 工具市场**，插件会根据 Config schema 自动生成表单：
+0.3.0 起提供独立的浏览器设置卡片（不是自动生成的表单）。安装后刷新 DSH 界面，打开设置侧栏新增的 **Tvendo 工具市场** 页面即可配置（插件页也提供同一张配置卡片）：
+
+1. 填入服务地址与平台 API Key。
+2. 按需设置默认费用上限、请求超时。
+3. 点击「保存」。配置写入当前 profile，工具下次调用立即生效，无需重启。
+
+密钥输入框始终为空，仅提示是否已保存；不修改密钥时留空即可。服务地址更换时，若没有同时输入新密钥，插件中原有密钥会一并清除；环境变量和 CLI 密钥也不能跨地址复用。密钥按 DSH 的 secret 规则从配置读取响应中移除，但仍以明文保存在本机 profile 配置中。
+
+升级后没有看到卡片时，先刷新界面；如果宿主提示需要重启，请完整退出并重新启动 DSH。此 UI 需要 DSH **>= 0.2.2-rc.1**。
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
@@ -132,7 +140,7 @@ TVENDO_SERVER=https://t.zhitoken.com TVENDO_API_KEY=tv_live_... npm run check:li
 - 平台不保存可恢复的结果正文，`tvendo_runs` 只用于对账与诊断。
 - 平台目前只提供同步调用，没有异步任务/回调。
 - 工具名固定为 `tvendo_*`，不会与 DSH 自带工具冲突。
-- 需要 DSH `>= 0.2.1-rc.2`（`engines.dsh`），更低版本会被插件管理器拒绝。
+- 需要 DSH `>= 0.2.2-rc.1`（`engines.dsh`），更低版本会被插件管理器拒绝。
 
 ## 目录结构
 

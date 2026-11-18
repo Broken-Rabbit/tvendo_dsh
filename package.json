@@ -1,6 +1,6 @@
 {
   "name": "dsh-tvendo",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "DeepSeek Harness plugin: find and call Tvendo tools from an ordinary DSH session",
   "keywords": [
@@ -17,7 +17,7 @@
   "author": "dyunwei",
   "engines": {
     "node": ">=22",
-    "dsh": ">=0.2.1-rc.2"
+    "dsh": ">=0.2.2-rc.1"
   },
   "repository": {
     "type": "git",
@@ -39,11 +39,13 @@
     ".": {
       "default": "./lib/index.js"
     },
+    "./client": "./lib/client.js",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "lib/index.js",
+    "lib/client.js",
     "lib/api.js",
     "lib/config.js",
     "lib/connection.js",
@@ -58,12 +60,21 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test --test-isolation=none test/api.test.mjs test/connection.test.mjs test/format.test.mjs test/tools.test.mjs",
+    "test": "node --test --test-isolation=none test/api.test.mjs test/connection.test.mjs test/format.test.mjs test/tools.test.mjs test/settings.test.mjs",
     "pack": "node scripts/pack.mjs",
     "check:pack": "npm run pack && node scripts/verify-package.mjs",
     "check:live": "node scripts/live-check.mjs"
   },
   "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "platform": "web"
+    },
     "bundle": {
       "patch": "./cordis.patch.yml"
     }

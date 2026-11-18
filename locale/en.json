@@ -1,4 +1,7 @@
 {
-  "title": "Tvendo tools",
-  "description": "Search and call external tools listed on a Tvendo deployment: per-call pricing over one shared balance and budget."
+  "meta": {
+    "title": "Tvendo tools",
+    "description": "Search and call Tvendo tools, with a settings UI for the server and API key.",
+    "detail": "README.md"
+  }
 }
